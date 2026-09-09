@@ -24,7 +24,7 @@
 # ============================================================
 import os as _os
 
-BOT_TOKEN = "88847333772:AAHVETNR3P6jsPmebmPt9Jf8qh0p2n63ZHc"   # @BotFather ka token (123456:ABC...)
+BOT_TOKEN = "8847333772:AAHVETNR3P6jsPmebmPt9Jf8qh0p2n63ZHc"   # @BotFather ka token (123456:ABC...)
 OWNER_ID  = 8348667414                 # aapka numeric Telegram user ID
 BOT_NAME  = "📦 Video Vault Bot"
 CREATOR_NAME = "@kesav86"
