@@ -339,8 +339,7 @@ async def open_videos_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     await q.edit_message_text(
-        "🎬 <b>Videos</b>\n\nBhai! Videos sirf <b>Start Link</b> se deliver hoti hain.\n\n"
-        "👉 Apne dost se <b>Start Link</b> manga lo, ya niche button use karo.",
+        "🎬 <b>Videos</b>\n\nBhai! Videos sirf <b>Start Link</b> se deliver hoti hain.\n\n",
         parse_mode=ParseMode.HTML)
 
 
