@@ -26,7 +26,7 @@ import os as _os
 
 BOT_TOKEN = "8847333772:AAHVETNR3P6jsPmebmPt9Jf8qh0p2n63ZHc"   # @BotFather ka token (123456:ABC...)
 OWNER_ID  = 8348667414                 # aapka numeric Telegram user ID
-BOT_NAME  = "📦 Video Vault Bot"
+BOT_NAME  = "📦 Vip Video Vault Bot"
 CREATOR_NAME = "@kesav86"
 SUPPORT_LINK = "https://t.me/@kesav82"
 
@@ -469,28 +469,16 @@ async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     counts = get_video_count(token)
     me = await context.bot.get_me()
     link = f"https://t.me/{me.username}?start={token}"
-
-    # 💰 Auto-create GPLink (agar token set hai)
-    glink = None
-    if GPLINKS_API_TOKEN:
-        await update.message.reply_text("⏳ GPLink ban raha hai...", parse_mode=ParseMode.HTML)
-        try:
-            glink = await make_gplink_async(link, alias=token)
-        except Exception as e:
-            log.error("GPLink error: %s", e)
-            await update.message.reply_text(
-                f"⚠️ GPLink nahi ban paaya: {code(str(e))}\nDirect link neeche hai.",
-                parse_mode=ParseMode.HTML)
-
     pending_upload.clear()
 
-    if glink:
+    # 🎛 /done sirf pack finalize karta hai — GPLink BANNE KA KAAM BUTTON PAR CHHODTA HAI
+    if GPLINKS_API_TOKEN:
         await update.message.reply_text(
             f"🎉 <b>Pack Ready!</b>\n\n📦 Title: {bold(title)}\n🎥 Items: <b>{counts}</b>\n\n"
-            f"💰 <b>GP LINK (earn per click) 👇</b>\n{code(glink)}\n\n"
-            f"🔗 <b>Direct Start Link</b>:\n{code(link)}\n\n"
-            f"✉️ Ye GPLink kisi ko bhi bhejo — user link tap karega, ek ad aayegi, "
-            f"phir saari items milengi.\n🡅 /mylinks dekho.",
+            f"🔗 <b>Direct Start Link:</b>\n{code(link)}\n\n"
+            f"💰 <i>GPLink chahiye? Neeche button dabao — wise button par tab link banega.</i>",
+            reply_markup=make_kb([[InlineKeyboardButton(
+                "💰 Create GPLink", callback_data=f"mk_gp_{token}")]]),
             parse_mode=ParseMode.HTML)
     else:
         await update.message.reply_text(
@@ -732,6 +720,31 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not get_pack(token):
             return await q.answer("Pack nahi mila.", show_alert=True)
         await q.answer("⏳ GP link ban raha hai...")
+        me = await context.bot.get_me()
+        link = f"https://t.me/{me.username}?start={token}"
+        try:
+            glink = await make_gplink_async(link, alias=token)
+            await q.message.reply_text(
+                f"💰 <b>GPLink ban gaya!</b>\n\n{code(glink)}\n\n🔗 Direct: {code(link)}",
+                parse_mode=ParseMode.HTML)
+        except Exception as e:
+            await q.message.reply_text(
+                f"⚠️ GPLink nahi ban paaya: {code(str(e))}\nDirect link:\n{code(link)}",
+                parse_mode=ParseMode.HTML)
+    elif data.startswith("mk_gp_"):
+        # /done ke baad wala "💰 Create GPLink" button
+        token = data[6:]
+        if not GPLINKS_API_TOKEN:
+            return await q.answer("GPLink token set nahi hai!", show_alert=True)
+        if not get_pack(token):
+            return await q.answer("Pack nahi mila.", show_alert=True)
+        await q.answer("⏳ GPLink ban raha hai...")
+        # button ko loading state me daalo
+        try:
+            await q.edit_message_reply_markup(reply_markup=make_kb([[
+                InlineKeyboardButton("⏳ Creating GPLink...", callback_data="loading")]]))
+        except Exception:
+            pass
         me = await context.bot.get_me()
         link = f"https://t.me/{me.username}?start={token}"
         try:
