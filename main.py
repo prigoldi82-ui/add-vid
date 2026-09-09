@@ -16,12 +16,23 @@
 #      python3 add2.py
 # ============================================================
 
-# ---------- ⚙️ SETTINGS (yahan edit karo) ----------
-BOT_TOKEN = "8847333772:AAHVETNR3P6jsPmebmPt9Jf8qh0p2n63ZHc"   # @BotFather ka token (123456:ABC...)
+# ============================================================
+#  ⚙️ SETTINGS
+#  pehle ENVIRONMENT VARIABLES check hoti hai (Railway/Heroku me
+#  yahi sahi hai), warna aage likhe default values use hoti hain.
+#  Railway par: BOT_TOKEN aur OWNER_ID as Variables set karo.
+# ============================================================
+import os as _os
+
+BOT_TOKEN = "88847333772:AAHVETNR3P6jsPmebmPt9Jf8qh0p2n63ZHc"   # @BotFather ka token (123456:ABC...)
 OWNER_ID  = 8348667414                 # aapka numeric Telegram user ID
 BOT_NAME  = "📦 Video Vault Bot"
 CREATOR_NAME = "@kesav86"
 SUPPORT_LINK = "https://t.me/@kesav82"
+
+# 💰 GPLINKS paid shortener token (gplinks.com → Developers API)
+# Empty = GPLink feature band. Set karo to /done par bot auto GPLink bana dega.
+GPLINKS_API_TOKEN = _os.getenv("GPLINKS_API_TOKEN", "1cbff655e7994c9bb28f509a21ca1c1f1b1d5bee")
 
 # Data storage files — JSON (alag-alag, persistent, readable)
 PACKS_DB = "packs_data.json"        # packs + videos ka data
@@ -229,6 +240,64 @@ def bold(t): return f"<b>{t}</b>"
 def code(t): return f"<code>{t}</code>"
 
 
+# ============================================================
+#  💰 GPLINKS PAID URL SHORTENER (gplinks.com Developers API)
+#  API doc: https://api.gplinks.com/api?api=<token>&url=<dst>&format=json
+#  Returns {"status":"success","shortenedUrl":"https://V.gplinks.com/xxxx"}
+# ============================================================
+import urllib.parse
+import json as _json
+import asyncio
+import requests as _requests
+
+
+def make_gplink(destination_url, alias=""):
+    """Kisi bhi URL ko GPLink me shrink karke wapas deta hai (JSON format).
+    Agar GPLINKS_API_TOKEN nahi set hai to original URL hi wapas karta hai.
+
+    GPLinks API Cloudflare ke piche hai, isliye browser-jaisa session use karte hain
+    taaki 'One moment, please' wali bot-check na aaye."""
+    if not GPLINKS_API_TOKEN:
+        return destination_url
+
+    _session = _requests.Session()
+    _session.headers.update({
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 "
+                       "Safari/537.36"),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://gplinks.com/",
+    })
+
+    params = {"api": GPLINKS_API_TOKEN, "url": destination_url, "format": "json"}
+    if alias:
+        params["alias"] = alias
+
+    resp = _session.get("https://api.gplinks.com/api", params=params, timeout=25)
+
+    # Cloudflare 'One moment, please' challenge => HTML aayi, JSON nahi
+    if resp.status_code != 200 or "One moment, please" in resp.text \
+            or resp.text.lstrip().startswith("<!DOCTYPE"):
+        raise ValueError(
+            "GPLinks API Cloudflare bot-check me phas gaya. Token/domain double-check karo, "
+            "ya thodi der baad try karo. (Direct link neeche hai.)"
+        )
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise ValueError("GPLinks ne invalid response diya. (Direct link neeche hai.)")
+
+    if data.get("status") == "success" and data.get("shortenedUrl"):
+        return data["shortenedUrl"]
+    raise ValueError(data.get("message", "GPLinks API error"))
+
+
+async def make_gplink_async(destination_url, alias=""):
+    return await asyncio.to_thread(make_gplink, destination_url, alias)
+
+
 # --- 🌟 BULLETPROOF INLINE KEYBOARD HELPER ---
 # Ye error ("text buttons are not allowed") tab aata hai jab kisi inline button
 # me koi ACTION field nahi hota (na url, na callback_data). Ye helper har button
@@ -275,7 +344,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👋 <b>Namaste {escape(user.first_name or 'friend')}!</b>\n\n"
         f"Welcome to {bold(BOT_NAME)} 🎥\n"
         f"Yahan premium videos milengi — bilkul free!\n\n"
-        f"📌 <i>Neeche button se videos open karein.</i>"
     )
     kb = [[InlineKeyboardButton("🎬 Open Videos", callback_data="open_videos")]]
     if is_owner(update):
@@ -361,7 +429,8 @@ async def show_owner_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, e
         f"{code('/stats')} │ poori info\n"
         f"{code('/exportdata')} │ ⬇️ data file nikaalo\n"
         f"{code('/exportusers')} │ 👥 users file nikaalo\n"
-        f"{code('/backup')} │ 💾 full backup (dono files)\n"
+            f"{code('/backup')} │ 💾 full backup (dono files)\n"
+        f"{code('/gplink')} │ 💰 paid GP link banao\n"
         f"{code('/broadcast')} │ sab users ko msg\n"
         f"{code('/cancel')} │ upload mode band"
     )
@@ -400,12 +469,35 @@ async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     counts = get_video_count(token)
     me = await context.bot.get_me()
     link = f"https://t.me/{me.username}?start={token}"
+
+    # 💰 Auto-create GPLink (agar token set hai)
+    glink = None
+    if GPLINKS_API_TOKEN:
+        await update.message.reply_text("⏳ GPLink ban raha hai...", parse_mode=ParseMode.HTML)
+        try:
+            glink = await make_gplink_async(link, alias=token)
+        except Exception as e:
+            log.error("GPLink error: %s", e)
+            await update.message.reply_text(
+                f"⚠️ GPLink nahi ban paaya: {code(str(e))}\nDirect link neeche hai.",
+                parse_mode=ParseMode.HTML)
+
     pending_upload.clear()
-    await update.message.reply_text(
-        f"🎉 <b>Pack Ready!</b>\n\n📦 Title: {bold(title)}\n🎥 Items: <b>{counts}</b>\n\n"
-        f"<b>Yeh raha aapka START LINK 👇</b>\n{code(link)}\n\n"
-        f"✉️ Ye link kisi ko bhi bhejo — link tap karte hi saari items milengi.\n🡅 /mylinks dekho.",
-        parse_mode=ParseMode.HTML)
+
+    if glink:
+        await update.message.reply_text(
+            f"🎉 <b>Pack Ready!</b>\n\n📦 Title: {bold(title)}\n🎥 Items: <b>{counts}</b>\n\n"
+            f"💰 <b>GP LINK (earn per click) 👇</b>\n{code(glink)}\n\n"
+            f"🔗 <b>Direct Start Link</b>:\n{code(link)}\n\n"
+            f"✉️ Ye GPLink kisi ko bhi bhejo — user link tap karega, ek ad aayegi, "
+            f"phir saari items milengi.\n🡅 /mylinks dekho.",
+            parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(
+            f"🎉 <b>Pack Ready!</b>\n\n📦 Title: {bold(title)}\n🎥 Items: <b>{counts}</b>\n\n"
+            f"<b>Yeh raha aapka START LINK 👇</b>\n{code(link)}\n\n"
+            f"✉️ Ye link kisi ko bhi bhejo — link tap karte hi saari items milengi.\n🡅 /mylinks dekho.",
+            parse_mode=ParseMode.HTML)
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -452,10 +544,16 @@ async def cmd_mylinks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         link = f"https://t.me/{me.username}?start={p['token']}"
         lines.append(f"{i}. <b>{escape(p['title'])}</b>\n    🔗 {code(link)}")
     await update.message.reply_text("\n\n".join(lines), parse_mode=ParseMode.HTML)
-    kb = [[InlineKeyboardButton(f"🗑 {p['title'][:20]}", callback_data=f"del_{p['token']}")] for p in packs[:20]]
+    kb = []
+    for p in packs[:20]:
+        kb.append([
+            InlineKeyboardButton(f"💰 GP  {p['title'][:16]}", callback_data=f"gp_{p['token']}"),
+            InlineKeyboardButton(f"🗑 {p['title'][:14]}", callback_data=f"del_{p['token']}"),
+        ])
     if kb:
-        await update.message.reply_text("🔽 Delete karne ke liye tap karo:",
-                                        reply_markup=make_kb(kb), parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "🔽 Action choose karo (💰 GP link banao • 🗑 delete):",
+            reply_markup=make_kb(kb), parse_mode=ParseMode.HTML)
 
 
 async def cmd_deletelink(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -466,6 +564,35 @@ async def cmd_deletelink(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ Ye pack nahi mila.", parse_mode=ParseMode.HTML)
     delete_pack(context.args[0])
     await update.message.reply_text("🗑️ Pack delete ho gaya.", parse_mode=ParseMode.HTML)
+
+
+async def cmd_gplink(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner: kisi pack ka GP link banao (paid shortener)."""
+    if not is_owner(update): return await no_perm(update)
+    if not GPLINKS_API_TOKEN:
+        return await update.message.reply_text(
+            "⚠️ GPLINKS_API_TOKEN set nahi hai. gplinks.com → Developers API se token lo aur "
+            "BOT me env var (GPLINKS_API_TOKEN) set karo.", parse_mode=ParseMode.HTML)
+
+    if not context.args:
+        return await update.message.reply_text(
+            "Usage: /gplink <token>\nToken dhoondhne ke liye /mylinks dekho.", parse_mode=ParseMode.HTML)
+    token = context.args[0]
+    if not get_pack(token):
+        return await update.message.reply_text("❌ Ye pack nahi mila.", parse_mode=ParseMode.HTML)
+
+    me = await context.bot.get_me()
+    link = f"https://t.me/{me.username}?start={token}"
+    await update.message.reply_text("⏳ GP link ban raha hai...", parse_mode=ParseMode.HTML)
+    try:
+        glink = await make_gplink_async(link, alias=token)
+        await update.message.reply_text(
+            f"💰 <b>GPLink bana diya!</b>\n\n{code(glink)}\n\n"
+            f"🔗 Direct: {code(link)}", parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await update.message.reply_text(
+            f"⚠️ GPLink nhi ban paaya: {code(str(e))}\nDirect link:\n{code(link)}",
+            parse_mode=ParseMode.HTML)
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -598,6 +725,24 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("del_"):
         delete_pack(data[4:])
         await q.answer("🗑️ Deleted.", show_alert=True)
+    elif data.startswith("gp_"):
+        token = data[3:]
+        if not GPLINKS_API_TOKEN:
+            return await q.answer("GPLink token set nahi hai!", show_alert=True)
+        if not get_pack(token):
+            return await q.answer("Pack nahi mila.", show_alert=True)
+        await q.answer("⏳ GP link ban raha hai...")
+        me = await context.bot.get_me()
+        link = f"https://t.me/{me.username}?start={token}"
+        try:
+            glink = await make_gplink_async(link, alias=token)
+            await q.message.reply_text(
+                f"💰 <b>GPLink ban gaya!</b>\n\n{code(glink)}\n\n🔗 Direct: {code(link)}",
+                parse_mode=ParseMode.HTML)
+        except Exception as e:
+            await q.message.reply_text(
+                f"⚠️ GPLink nahi ban paaya: {code(str(e))}\nDirect link:\n{code(link)}",
+                parse_mode=ParseMode.HTML)
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -619,6 +764,7 @@ def main():
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("mylinks", cmd_mylinks))
     app.add_handler(CommandHandler("deletelink", cmd_deletelink))
+    app.add_handler(CommandHandler("gplink", cmd_gplink))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("exportdata", cmd_exportdata))
     app.add_handler(CommandHandler("exportusers", cmd_exportusers))
